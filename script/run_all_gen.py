@@ -16,6 +16,9 @@ from datetime import datetime
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DNAFM_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, ".."))
+MODEL_WEIGHT = os.path.join(DNAFM_ROOT, "model_weight")
+DATASET_PATH = os.path.join(PROJECT_ROOT, "data", "all_viral", "gen_data")
 # Put project root at the front so local packages (e.g. `datasets/`) win over site-packages.
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -25,9 +28,6 @@ from datasets.virus_datasets import VirusSplitDatasets
 from evaluators.finetune import FineTuneSeqEvaluator
 from datasets.gen_datasets import GenDataset
 from evaluators.gen import GenEvaluator
-
-MODEL_WEIGHT = "../../model_weight"
-DATASET_PATH = "../../GeneShield/data/all_viral/gen_data"
 
 def run(
     model_name: str,
