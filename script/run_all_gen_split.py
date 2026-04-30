@@ -26,8 +26,8 @@ from evaluators.finetune import FineTuneSeqEvaluator
 from datasets.gen_datasets import GenDataset
 from evaluators.gen import GenEvaluator
 
-MODEL_WEIGHT = "../../model_weight"
-DATASET_PATH = "../../GeneShield/data/all_viral/gen_data"
+MODEL_WEIGHT = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/model_weight"
+DATASET_PATH = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/data/all_viral/gen_data"
 
 
 def run(
@@ -102,17 +102,17 @@ def run(
         MODEL_DIR = None
         from models.hyenadna_local import HyenaDNALocal
         if model_name == "hyena_local-12M-mini-virus":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-12M-mini-virus"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-12M-mini-virus"
         elif model_name == "hyena_local-12M-virus":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-12M-virus"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-12M-virus"
         elif model_name == "hyena_local-test":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-test"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-test"
         elif model_name == "hyena_local-436k-virus":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-436k-virus"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-436k-virus"
         elif model_name == "hyena_local-3.2M-virus":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-3.2M-virus"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-3.2M-virus"
         elif model_name == "hyena_local-253M":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/hyena_local-253M"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/hyena_local-253M"
         if MODEL_DIR is None:
             if model_dir is None:
                 raise ValueError(
@@ -135,7 +135,7 @@ def run(
         model = HyenaDNALocal(
             model_dir=MODEL_DIR,
             device="cuda",
-            pretrain_root="../../GeneShield/pretrain/hyena-dna",
+            pretrain_root="/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna",
         )
     
     elif model_name == "Genos-1.2B" or model_name == "Genos-10B" or model_name == "Genos-10B-v2":
@@ -217,13 +217,13 @@ def run(
         MODEL_DIR = None
         from models.hyenadna_local import HyenaDNALocal
         if model_name == "ViroHyena-436k":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/ViroHyena-436k"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/ViroHyena-436k"
         elif model_name == "ViroHyena-1m":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/ViroHyena-1m"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/ViroHyena-1m"
         elif model_name == "ViroHyena-6m":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/ViroHyena-6m"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/ViroHyena-6m"
         elif model_name == "ViroHyena-253m":
-            MODEL_DIR = "../../GeneShield/pretrain/hyena-dna/ViroHyena-253m"
+            MODEL_DIR = "/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna/ViroHyena-253m"
         
         print("---------------------------------------当前模型---------------------------------------")
         print(model_name)
@@ -232,7 +232,7 @@ def run(
         model = HyenaDNALocal(
             model_dir=MODEL_DIR,
             device="cuda",
-            pretrain_root="../../GeneShield/pretrain/hyena-dna",
+            pretrain_root="/inspire/hdd/project/aiscientist/yedongxin-CZXS25120006/DNAFM/GeneShield/pretrain/hyena-dna",
         )
 
     if dataset_name == "cds-short":
@@ -256,8 +256,15 @@ def run(
 
     # 生成序列并评估
     # 直接使用 GenDataset，无需适配器（GenEvaluator 已支持 (idx, sequence, taxid) 格式）
+    prompt_dir = (
+        "prompt_len_half"
+        if prompt_len < 0
+        else f"prompt_len_{prompt_len}"
+    )
+    split_dir = str(split_index) if split_index is not None else "all"
     output_dir = os.path.join(
-        results_root, f"{dataset_name}/{model_name}/{split_index if split_index is not None else 'all'}/")
+        results_root, dataset_name, model_name, prompt_dir, split_dir
+    )
     
     gen_evaluator = GenEvaluator(
         model=model,
@@ -326,6 +333,8 @@ python script/run_all_gen_split.py --model_name evo-1-8k-base --dataset_name cds
 python script/run_all_gen_split.py --model_name hyenadna-tiny-16k --dataset_name cds-short --split_index 1
 python script/run_all_gen_split.py --model_name Genos-1.2B --dataset_name cds-short --split_index 1
 python script/run_all_gen_split.py --model_name ViroHyena-436k --dataset_name cds-long --split_index 1
+
+python script/run_all_gen_split.py --model_name evo2_1b_base --dataset_name cds-short --split_index 1
 """
 
 def main():

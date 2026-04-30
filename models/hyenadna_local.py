@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import itertools
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
@@ -153,12 +154,191 @@ class CharacterTokenizer:
         return {"input_ids": all_ids}
 
 
+class KmerTokenizer:
+    """Fixed-k tokenizer for DNA strings (default non-overlap k=6 stride=6)."""
+
+    def __init__(
+        self,
+        k: int = 6,
+        stride: Optional[int] = None,
+        alphabet: Optional[List[str]] = None,
+        model_max_length: int = 1026,
+        padding_side: str = "left",
+    ):
+        self.k = int(k)
+        self.stride = int(stride if stride is not None else k)
+        self.alphabet = [x.upper() for x in (alphabet or ["A", "C", "G", "T", "N"])]
+        self.model_max_length = model_max_length
+        self.padding_side = padding_side
+
+        special = {
+            "[CLS]": 0,
+            "[SEP]": 1,
+            "<redacted_BOS>": 2,
+            "[MASK]": 3,
+            "<redacted_PAD>": 4,
+            "[RESERVED]": 5,
+            "<redacted_UNK>": 6,
+        }
+        kmers = ("".join(parts) for parts in itertools.product(self.alphabet, repeat=self.k))
+        self._vocab_str_to_int = {
+            **special,
+            **{tok: i + len(special) for i, tok in enumerate(kmers)},
+        }
+        self._vocab_int_to_str = {v: k for k, v in self._vocab_str_to_int.items()}
+
+        self.pad_token_id = self._vocab_str_to_int["<redacted_PAD>"]
+        self.unk_token_id = self._vocab_str_to_int["<redacted_UNK>"]
+        self.sep_token_id = self._vocab_str_to_int["[SEP]"]
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._vocab_str_to_int)
+
+    def _tokenize(self, text: str) -> List[str]:
+        s = (text or "").replace(" ", "").replace("\n", "").replace("\t", "").upper()
+        if not s:
+            return []
+        toks = []
+        for i in range(0, len(s), self.stride):
+            chunk = s[i : i + self.k]
+            if len(chunk) < self.k:
+                chunk = chunk + ("N" * (self.k - len(chunk)))
+            toks.append(chunk)
+        return toks
+
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = False,
+        padding: bool = False,
+        max_length: Optional[int] = None,
+        truncation: bool = False,
+        return_tensors: Optional[str] = None,
+    ) -> Union[List[int], Dict[str, torch.Tensor]]:
+        toks = self._tokenize(text)
+        ids = [self._vocab_str_to_int.get(t, self.unk_token_id) for t in toks]
+        if add_special_tokens:
+            ids = ids + [self.sep_token_id]
+        max_len = max_length or self.model_max_length
+        if truncation and len(ids) > max_len:
+            ids = ids[:max_len]
+        if padding and len(ids) < max_len:
+            pad_len = max_len - len(ids)
+            if self.padding_side == "left":
+                ids = [self.pad_token_id] * pad_len + ids
+            else:
+                ids = ids + [self.pad_token_id] * pad_len
+        if return_tensors == "pt":
+            return {"input_ids": torch.tensor([ids], dtype=torch.long)}
+        return ids
+
+    def decode(self, ids: Union[List[int], torch.Tensor], skip_special_tokens: bool = True) -> str:
+        if torch.is_tensor(ids):
+            ids = ids.tolist()
+        if ids and isinstance(ids[0], list):
+            ids = ids[0]
+        special = {0, 1, 2, 3, 4, 5, 6}
+        toks = []
+        for i in ids:
+            i = int(i)
+            if skip_special_tokens and i in special:
+                continue
+            toks.append(self._vocab_int_to_str.get(i, "<redacted_UNK>"))
+        return "".join(toks)
+
+    def __call__(
+        self,
+        text: Union[str, List[str]],
+        return_tensors: Optional[str] = None,
+        padding: bool = False,
+        truncation: bool = False,
+        max_length: Optional[int] = None,
+        add_special_tokens: bool = False,
+    ) -> Dict[str, Any]:
+        if isinstance(text, str):
+            text = [text]
+        max_len = max_length or self.model_max_length
+        all_ids = []
+        for t in text:
+            ids = self.encode(
+                t,
+                add_special_tokens=add_special_tokens,
+                truncation=truncation,
+                max_length=max_len,
+            )
+            all_ids.append(ids if isinstance(ids, list) else ids["input_ids"][0].tolist())
+        if padding:
+            pad_len = max(len(x) for x in all_ids) if all_ids else 0
+            if max_len is not None:
+                pad_len = min(pad_len, max_len)
+            padded = []
+            for ids in all_ids:
+                if len(ids) < pad_len:
+                    if self.padding_side == "left":
+                        ids = [self.pad_token_id] * (pad_len - len(ids)) + ids
+                    else:
+                        ids = ids + [self.pad_token_id] * (pad_len - len(ids))
+                else:
+                    ids = ids[:pad_len]
+                padded.append(ids)
+            all_ids = padded
+        if return_tensors == "pt":
+            return {"input_ids": torch.tensor(all_ids, dtype=torch.long)}
+        return {"input_ids": all_ids}
+
+
 def _ensure_pretrain_import(pretrain_root: Optional[str] = None) -> None:
     root = pretrain_root or os.environ.get("HYENA_PRETRAIN_ROOT")
     if root:
         root = os.path.abspath(os.path.normpath(root))
         if root not in sys.path:
             sys.path.insert(0, root)
+        # HyenaDNA repo keeps flash_attn under pretrain_root/flash-attention.
+        # Add this path so `import flash_attn` works without pip installing it.
+        flash_attn_root = os.path.join(root, "flash-attention")
+        if os.path.isdir(flash_attn_root) and flash_attn_root not in sys.path:
+            sys.path.insert(0, flash_attn_root)
+
+
+def _build_tokenizer_from_model_dir(model_dir: str, max_len: int):
+    tokenizer_config_path = os.path.join(model_dir, "tokenizer_config.json")
+    tok_cfg = {}
+    if os.path.exists(tokenizer_config_path):
+        with open(tokenizer_config_path, "r", encoding="utf-8") as f:
+            tok_cfg = json.load(f)
+
+    tok_class = str(tok_cfg.get("tokenizer_class", "")).lower()
+    tok_name = str(tok_cfg.get("tokenizer_name", "")).lower()
+    tok_max_len = int(tok_cfg.get("model_max_length", max_len))
+    tok_padding_side = tok_cfg.get("padding_side", "left")
+
+    if tok_class == "kmertokenizer" or tok_name.startswith("kmer"):
+        tokenizer = KmerTokenizer(
+            k=int(tok_cfg.get("k", 6)),
+            stride=int(tok_cfg.get("stride", 6)),
+            alphabet=tok_cfg.get("alphabet", ["A", "C", "G", "T", "N"]),
+            model_max_length=tok_max_len,
+            padding_side=tok_padding_side,
+        )
+        return tokenizer, "kmer"
+
+    if tok_class == "pretrainedtokenizerfast" and os.path.exists(os.path.join(model_dir, "tokenizer.json")):
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_dir,
+            trust_remote_code=False,
+            local_files_only=True,
+            padding_side=tok_padding_side,
+            model_max_length=tok_max_len,
+        )
+        return tokenizer, "bpe"
+
+    tokenizer = CharacterTokenizer(
+        characters=tok_cfg.get("characters", ["A", "C", "G", "T", "N"]),
+        model_max_length=tok_max_len,
+        padding_side=tok_padding_side,
+    )
+    return tokenizer, "char"
 
 
 def _load_model_and_tokenizer(
@@ -247,17 +427,8 @@ def _load_model_and_tokenizer(
     model = model.to(device)
 
     max_len = config.get("max_position_embeddings", 1024) + 2
-    tokenizer_config_path = os.path.join(model_dir, "tokenizer_config.json")
-    if os.path.exists(tokenizer_config_path):
-        with open(tokenizer_config_path, "r", encoding="utf-8") as f:
-            tok_cfg = json.load(f)
-        tokenizer = CharacterTokenizer(
-            characters=tok_cfg.get("characters", ["A", "C", "G", "T", "N"]),
-            model_max_length=tok_cfg.get("model_max_length", max_len),
-            padding_side=tok_cfg.get("padding_side", "left"),
-        )
-    else:
-        tokenizer = CharacterTokenizer(model_max_length=max_len, padding_side="left")
+    tokenizer, tokenizer_type = _build_tokenizer_from_model_dir(model_dir, max_len=max_len)
+    print(f"[HyenaDNALocal] tokenizer_type={tokenizer_type}")
 
     return model, tokenizer, config
 
@@ -437,6 +608,17 @@ class HyenaDNALocal:
             logits = new_logits
         return logits
 
+    @staticmethod
+    def _decode_token_ids(tokenizer, token_ids: Union[List[int], torch.Tensor]) -> str:
+        if torch.is_tensor(token_ids):
+            token_ids = token_ids.detach().cpu().tolist()
+        try:
+            return tokenizer.decode(token_ids, skip_special_tokens=True)
+        except Exception:
+            if token_ids and isinstance(token_ids[0], list):
+                return tokenizer.decode(token_ids[0], skip_special_tokens=True)
+            raise
+
     @torch.no_grad()
     def generate(
         self,
@@ -485,7 +667,7 @@ class HyenaDNALocal:
                     next_id = torch.multinomial(probs, num_samples=1)
                     input_ids = torch.cat([input_ids, next_id.unsqueeze(0)], dim=1)
 
-                txt = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
+                txt = self._decode_token_ids(self.tokenizer, input_ids[0])
                 txt = (txt or "").replace(" ", "").strip()
                 outputs.append(txt)
 
@@ -639,7 +821,7 @@ class HyenaDNALocal:
 
                     input_ids = torch.cat([input_ids, next_id.view(1, 1)], dim=1)
 
-                txt = tok.decode(input_ids[0], skip_special_tokens=True)
+                txt = self._decode_token_ids(tok, input_ids[0])
                 txt = txt.replace(" ", "")  # char-level tokenizer 有时会带空格
                 outputs.append(txt)
 

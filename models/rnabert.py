@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib.util
 import os
 import json
 import sys
@@ -10,13 +11,18 @@ for name in ['Mapping', 'MutableMapping', 'Sequence']:
     if not hasattr(collections, name):
         setattr(collections, name, getattr(collections.abc, name))
 
-ABS_RNABERT_PATH = "../../model/RNABERT"
-if os.path.exists(ABS_RNABERT_PATH):
+# RNABERT 源码目录（含 utils/bert.py），优先用环境变量 RNABERT_PATH，否则默认 model_weight/rnabert 或 ../../model/RNABERT
+ABS_RNABERT_PATH = os.environ.get("RNABERT_PATH", "")
+if not ABS_RNABERT_PATH or not os.path.exists(ABS_RNABERT_PATH):
+    _gene_shield_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _model_weight_rnabert = os.path.abspath(os.path.join(_gene_shield_root, "..", "model_weight", "rnabert"))
+    if os.path.exists(_model_weight_rnabert):
+        ABS_RNABERT_PATH = _model_weight_rnabert
+    else:
+        ABS_RNABERT_PATH = os.path.normpath(os.path.join(_gene_shield_root, "..", "model", "RNABERT"))
+if ABS_RNABERT_PATH and os.path.exists(ABS_RNABERT_PATH):
     if ABS_RNABERT_PATH not in sys.path:
-        sys.path.append(ABS_RNABERT_PATH)
-        print(f"Added {ABS_RNABERT_PATH} to sys.path")
-else:
-    print(f"Warning: Path not found: {ABS_RNABERT_PATH}")
+        sys.path.insert(0, ABS_RNABERT_PATH)
 
 import torch
 import numpy as np
@@ -24,9 +30,19 @@ from tqdm import tqdm
 from typing import List, Optional, Literal, Union, Tuple
 from attrdict import AttrDict
 
-from utils.bert import BertModel, BertForMaskedLM
-
 from .base_model import BaseModel
+
+# 动态导入 RNABERT 源码中的 utils.bert（需在 sys.path 含 RNABERT 根目录后）
+if ABS_RNABERT_PATH and os.path.exists(ABS_RNABERT_PATH):
+    _utils_bert = importlib.import_module("utils.bert")
+    BertModel = _utils_bert.BertModel
+    BertForMaskedLM = _utils_bert.BertForMaskedLM
+else:
+    if not ABS_RNABERT_PATH:
+        ABS_RNABERT_PATH = "(none)"
+    print(f"Warning: RNABERT path not found: {ABS_RNABERT_PATH}")
+    BertModel = None  # type: ignore
+    BertForMaskedLM = None  # type: ignore
 
 Pooling = Literal["mean", "max", "cls"]
 

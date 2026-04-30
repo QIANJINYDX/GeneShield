@@ -6,3 +6,7 @@ package (HuggingFace). When `PROJECT_ROOT` is placed at the front of `sys.path`,
 `from datasets...` will resolve to this package.
 """
 
+from datasets.csv_dataset import CSVSequenceDataset  # noqa: F401
+
+__all__ = ["CSVSequenceDataset"]
+

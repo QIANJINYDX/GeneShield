@@ -367,40 +367,44 @@ class FineTuneSeqEvaluator:
             embs = embs / denom
         return embs
 
-    def _is_cnn_embedder(self) -> bool:
+    def _is_sequence_forward_features_model(self) -> bool:
         try:
+            from models.bilstm import GenomeBiLSTM1D
             from models.cnn import GenomeCNN1D
+            from models.transformer_baseline import GenomeTransformerEncoder1D
         except Exception:
             return False
-        if self.embedder is not None:
-            return isinstance(self.embedder, GenomeCNN1D)
-        return isinstance(self.model, GenomeCNN1D)
+        mod = self.embedder if self.embedder is not None else self.model
+        return isinstance(
+            mod,
+            (GenomeCNN1D, GenomeBiLSTM1D, GenomeTransformerEncoder1D),
+        )
 
-    def _embed_batch_inputs_cnn(
+    def _embed_batch_inputs_sequence_forward_features(
         self,
         seqs: List[str],
     ) -> np.ndarray:
         """
-        CNN 专用 embedding 提取：
-        - 将序列映射为 token ids (A/C/G/T/N -> 1..5, PAD=0)
-        - 使用 GenomeCNN1D.forward_features 获取 pooled 特征
+        本地序列基线（CNN / BiLSTM / Transformer）：DNA -> token ids，再 forward_features。
         """
         if not seqs:
             return np.zeros((0, 0), dtype=np.float32)
 
         vocab = {"A": 1, "C": 2, "G": 3, "T": 4, "N": 5}
-        cnn_model = self.embedder
-        if cnn_model is None:
-            raise ValueError("CNN embedder is None; cannot extract embeddings.")
-        pad_idx = getattr(getattr(cnn_model, "cfg", None), "pad_idx", 0)
+        seq_model = self.embedder if self.embedder is not None else self.model
+        if seq_model is None:
+            raise ValueError(
+                "sequence forward_features model is None; cannot extract embeddings."
+            )
+        pad_idx = getattr(getattr(seq_model, "cfg", None), "pad_idx", 0)
         device = self.device
         try:
-            device = next(cnn_model.parameters()).device
+            device = next(seq_model.parameters()).device
         except StopIteration:
             pass
 
         outputs: List[np.ndarray] = []
-        cnn_model.eval()
+        seq_model.eval()
         with torch.no_grad():
             for start in range(0, len(seqs), self.emb_batch_size):
                 batch = seqs[start:start + self.emb_batch_size]
@@ -416,7 +420,7 @@ class FineTuneSeqEvaluator:
                         tokens[i, :len(ids)] = torch.tensor(
                             ids, dtype=torch.long)
                 tokens = tokens.to(device)
-                feats = cnn_model.forward_features(tokens)
+                feats = seq_model.forward_features(tokens)
                 outputs.append(feats.detach().cpu().numpy())
 
         embs = np.concatenate(outputs, axis=0).astype(np.float32, copy=False)
@@ -594,8 +598,8 @@ class FineTuneSeqEvaluator:
                 raise ValueError(
                     f"数据集 __getitem__ 返回了 {len(item)} 个值，期望 2/3 或 dict")
 
-        if self._is_cnn_embedder():
-            embs = self._embed_batch_inputs_cnn(seqs)
+        if self._is_sequence_forward_features_model():
+            embs = self._embed_batch_inputs_sequence_forward_features(seqs)
         else:
             embs = self._embed_batch_inputs(seqs)
         feats_np = embs  # (N, D)
@@ -688,8 +692,8 @@ class FineTuneSeqEvaluator:
             nonlocal chunk_idx
             if not seqs:
                 return
-            if self._is_cnn_embedder():
-                embs = self._embed_batch_inputs_cnn(seqs)
+            if self._is_sequence_forward_features_model():
+                embs = self._embed_batch_inputs_sequence_forward_features(seqs)
             else:
                 embs = self._embed_batch_inputs(seqs)
             feats_t = torch.from_numpy(embs.astype(np.float32, copy=False))

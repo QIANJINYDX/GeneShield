@@ -180,8 +180,14 @@ def run(
 
     # 生成序列并评估
     # 直接使用 GenDataset，无需适配器（GenEvaluator 已支持 (idx, sequence, taxid) 格式）
+    prompt_dir = (
+        "prompt_len_half"
+        if prompt_len < 0
+        else f"prompt_len_{prompt_len}"
+    )
     output_dir = os.path.join(
-        results_root, f"{dataset_name}/{model_name}/")
+        results_root, dataset_name, model_name, prompt_dir
+    )
     
     gen_evaluator = GenEvaluator(
         model=model,
@@ -244,7 +250,7 @@ def run(
         print(f"  Valid samples: {stats.get('valid_count', 0)} / {stats.get('count', 0)}")
 
 """
-python script/run_all_gen.py --model_name evo2_1b_base --dataset_name cds-short
+python script/run_all_gen.py --model_name evo2_1b_base --dataset_name cds-short 
 python script/run_all_gen.py --model_name evo-1-8k-base --dataset_name cds-short
 python script/run_all_gen.py --model_name evo-1.5-8k-base --dataset_name cds-short
 python script/run_all_gen.py --model_name hyenadna-tiny-16k --dataset_name cds-short
